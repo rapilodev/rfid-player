@@ -1,0 +1,66 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use File::Basename qw(dirname);
+
+$|=1;
+
+my $dirname = dirname(__FILE__);
+chdir $dirname;
+
+sub get_url($) {
+    my $file = shift;
+    for my $line (split /\n/, qx{cat $file} ){
+        return $line if $line=~/^http:/;
+    }
+    return ();
+}
+
+sub find($) {
+    my $rfid = shift;
+    my @files = glob("$rfid/*");
+    next unless @files;
+    my $file = shift @files;
+    print "found file=$file\n";
+    return $file;
+}
+
+sub play($) {
+    my $file = shift;
+    system ("pkill -f ffmpeg");
+    my $filter = '';
+    my $output = "alsa default";
+    my $cmd    = "ffmpeg -i $file $filter -f $output";
+    print "$cmd\n";
+    system( $cmd." &" ) ;
+}
+
+open my $cmd, 'python3 rfid-reader |' or die $!;
+while (<$cmd>) {
+    my $rfid = $_;
+    $rfid=~s/[^0-9]//g;
+    next unless $rfid;
+
+    unless (-d $rfid){
+        print "create slot for new card $rfid\n";
+        mkdir $rfid;
+        chmod 0777, $rfid;
+        next;
+    };
+
+    my $file = find $rfid;
+    next unless $file;
+
+    if ($file =~ /\.sh$/){
+        system "sh $file";
+        next;
+    }
+
+    $file = get_url $file if $file =~/\.m3u$/;
+    next unless $file;
+
+    play $file;
+}
+close $cmd or die;
+

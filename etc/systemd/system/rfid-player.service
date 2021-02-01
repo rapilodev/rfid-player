@@ -1,0 +1,13 @@
+[Unit]
+Description=rfid-player
+
+[Service]
+Type=simple
+ExecStart=/home/ubuntu/rfid-player/rfid-player
+Restart=always
+TimeoutSec=infinity
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target
+
