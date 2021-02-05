@@ -9,7 +9,7 @@ $|=1;
 my $dirname = dirname(__FILE__);
 chdir $dirname;
 
-sub get_url($) {
+sub get_url {
     my $file = shift;
     for my $line (split /\n/, qx{cat $file} ){
         return $line if $line=~/^http:/;
@@ -17,24 +17,26 @@ sub get_url($) {
     return ();
 }
 
-sub find($) {
-    my $rfid = shift;
-    my @files = glob("$rfid/*");
-    next unless @files;
+sub find {
+    my $pattern = shift;
+    my @files = glob($pattern);
+    return unless @files;
     my $file = shift @files;
     print "found file=$file\n";
     return $file;
 }
 
-sub play($) {
+sub play {
     my $file = shift;
     system ("pkill -f ffmpeg");
-    my $filter = '';
+    return until $file;
     my $output = "alsa default";
-    my $cmd    = "ffmpeg -i $file $filter -f $output";
+    my $cmd    = "ffmpeg -i $file -f $output";
     print "$cmd\n";
     system( $cmd." &" ) ;
 }
+
+play(find("start/*"));
 
 open my $cmd, 'python3 rfid-reader |' or die $!;
 while (<$cmd>) {
@@ -49,18 +51,17 @@ while (<$cmd>) {
         next;
     };
 
-    my $file = find $rfid;
+    my $file = find("$rfid/*");
     next unless $file;
 
-    if ($file =~ /\.sh$/){
-        system "sh $file";
+    $file = get_url($file) if $file =~/\.m3u$/;
+    next unless $file;
+
+    if ($file=~/\.sh$/){
+        system("sh $file");
         next;
+    }else{
+        play("'$file'");
     }
-
-    $file = get_url $file if $file =~/\.m3u$/;
-    next unless $file;
-
-    play $file;
 }
 close $cmd or die;
-
