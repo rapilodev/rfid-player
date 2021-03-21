@@ -2,16 +2,53 @@
 
 use warnings;
 use strict;
-use File::Basename qw(dirname);
-use Time::HiRes qw(sleep);
-use IO::Select();
+use feature 'state';
 
+use File::Basename qw(dirname);
+use Time::HiRes qw(sleep time);
+use IO::Select();
+use POSIX ":sys_wait_h";
 $| = 1;
 
+my $card_status = "/proc/asound/card0/pcm0p/sub0/hw_params";
 my $dirname = dirname(__FILE__);
 chdir $dirname;
+my $PID = $$;
+local $SIG{USR1} = sub { handle('NEXT') if $$ == $PID; };
 
-my $card_status = "/proc/asound/card0/pcm0p/sub0/hw_params";
+sub play {
+    my $file = shift;
+    $file = $file->[0] if ref($file) eq 'ARRAY';
+    return until $file;
+
+    while ( system("grep 'closed' $card_status") and $? ) {
+        system "pkill -f ffmpeg";
+        sleep 0.1;
+    }
+
+    if ( ( fork // die("failed to fork: $!") ) == 0 ) {
+        my @cmd = (
+            '/usr/bin/ffmpeg', '-hide_banner', '-loglevel', 'error',
+            '-f',              'alsa',         'default',   '-i',
+            $file
+        );
+        if ( my $pid = open( my $fh, "-|", @cmd ) or die $! ) {
+            waitpid $pid, 0;
+            kill 'USR1', $PID unless $?;
+            exit $?;
+        }
+        exit 0;    # child
+    }
+}
+
+sub create {
+    my ($rfid) = @_;
+    print "create slot for new card $rfid\n";
+    mkdir $rfid or die "cannot create $rfid, $!";
+    chmod 0777, $rfid;
+    unlink "newest" if -l "newest";
+    symlink $rfid, "newest";
+}
 
 sub get_url {
     my $file = shift;
@@ -21,62 +58,38 @@ sub get_url {
     return ();
 }
 
-sub find {
-    my $pattern = shift;
-    my @files   = glob($pattern);
-    return unless @files;
-    my $file = shift @files;
-    print "found file=$file\n";
-    return $file;
+sub handle {
+    my ($rfid) = @_;
+    state $nexts = [];
+    state $prevs = [];
+
+    return unless $rfid;
+    my @files = glob "$rfid/*";
+    my $file  = ( shift @files ) // '';
+    if (    ( $rfid eq 'NEXT' or $file =~ m{\/NEXT$} )
+        and @$nexts > 0
+        and ( my $next = shift @$nexts ) )
+    {
+        push @$prevs, $next;
+        play $prevs->[-1];
+    } elsif ( ( $rfid eq 'PREV' or $file =~ m{\/PREV$} ) and ( @$prevs > 1 ) ) {
+        unshift @$nexts, pop @$prevs;
+        play $prevs->[-1] if $prevs;
+    } elsif ( $file !~ m/\/(PREV|NEXT)$/ ) {
+        return unless $file;
+        return system("sh $file") if $file =~ /\.sh$/;
+        $file = get_url $file if $file =~ /\.m3u$/;
+        return unless $file;
+        $prevs = [$file];
+        $nexts = \@files;
+        play $prevs->[-1];
+    }
 }
 
-sub play {
-    my $file = shift;
-    return until $file;
-
-    while ( system("grep 'closed' $card_status") and $? ) {
-        system "pkill -f ffmpeg";
-        sleep 0.1;
-    }
-
-    my $options = "-hide_banner -loglevel error";
-    my $output  = "alsa default";
-    my $cmd     = "ffmpeg $options -i $file -f $output";
-    print "$cmd\n";
-    system( $cmd . " &" );
-}
-
-play( find("start/*") );
-
-open my $cmd, 'python3 rfid-reader |' or die $!;
-while ( my $select = IO::Select->new($cmd) ) {
-
-    foreach my $fh ( $select->can_read(3600) ) {
-        sysread $fh, my $buffer, 1024;
-        my @requests = split "\n", $buffer;
-        my $rfid     = $requests[-1];
-        $rfid =~ s/[^0-9]//g;
-        next unless $rfid;
-
-        unless ( -d $rfid ) {
-            print "create slot for new card $rfid\n";
-            mkdir $rfid;
-            chmod 0777, $rfid;
-            next;
-        }
-
-        my $file = find("$rfid/*");
-        next unless $file;
-
-        $file = get_url($file) if $file =~ /\.m3u$/;
-        next unless $file;
-
-        if ( $file =~ /\.sh$/ ) {
-            system("sh $file");
-            next;
-        } else {
-            play("'$file'");
-        }
-    }
+play glob("start/*");
+open my $cmd, '-|', qw(python3 rfid-reader) or die $!;
+while ( my $rfid = <$cmd> =~ s/[^0-9]//gr ) {
+    create $rfid unless -d $rfid;
+    handle $rfid;
 }
 close $cmd or die;
