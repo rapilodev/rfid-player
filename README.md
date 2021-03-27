@@ -1,12 +1,13 @@
-# simple audio player box controlled by RFID cards
+# a simple audio player controlled by RFID cards
 
-Scanning a rfid card creates a folder with its ID.
-To assign an action to the card, put a file into this folder:
-* a media file will be played out.
-* a .m3ua file can be used to start playing an network audio stream (requires running network).
-* a .sh script will trigger any scripted action (for example: stop, shutdown, upgrade)
+After reading an rfid card, an associated audio file is played.
+If no file has been assigned yet, an empty folder is created in which audio files can be stored. Multiple audio files in an album folder are played in sequence.
 
-based on the idea of https://github.com/MiczFlor/RPi-Jukebox-RFID
+If a network is available, audio streams can be played as .m3ua files. Arbitrary actions can be triggered by shell scripts with the file extension .sh in the folders (e.g.: stop, shutdown, upgrade).
+If several audio files of an album are in one folder, they can be navigated by RFID cards.
+To register these navigation cards, only one file named NEXT or PREV must be placed in the folder belonging to the card.
+
+This player is based on the idea of https://github.com/MiczFlor/RPi-Jukebox-RFID
 
 ## Installation
 
